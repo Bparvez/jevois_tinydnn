@@ -1,0 +1,29 @@
+general: 
+  displayname: Obj Detect 
+  synopsis: This author is too lazy to write a synopsis! 
+  description: > 
+    This module detects object usign the cifar10 trained network<p>TODO: Decide
+      upon a video mapping 
+
+  parameters: 
+
+
+authorship: 
+  author: Bilal Parvez
+  email: bilalp@kth.se
+  mainurl: https://bparvez.github.io/
+  supporturl: 
+  otherurl: 
+  address: Landsberger Str. 425, 81241 München
+
+licensing: 
+  copyright: Copyright (C) 2017 by Bilal Parvez
+  license: GPL v3
+  distribution: Unrestricted
+  restrictions: None
+
+os: 
+  name: Ubuntu
+  version: 16.04.2
+  depends: 
+
