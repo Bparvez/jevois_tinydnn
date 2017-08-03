@@ -1,8 +1,0 @@
-/jevois/modules/Bilal/ObjDetect/icon.png
-/jevois/modules/Bilal/ObjDetect/screenshot1.png
-/jevois/modules/Bilal/ObjDetect/tiny-dnn/MNIST/weights.tnn
-/jevois/modules/Bilal/ObjDetect/tiny-dnn/CIFAR/batches.meta.txt
-/jevois/modules/Bilal/ObjDetect/tiny-dnn/CIFAR/weights.tnn
-/jevois/modules/Bilal/ObjDetect/tiny-dnn/CIFAR/readme.html
-/jevois/modules/Bilal/ObjDetect/postinstall
-/jevois/modules/Bilal/ObjDetect/ObjDetect.so
