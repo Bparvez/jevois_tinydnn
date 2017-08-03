@@ -64,7 +64,8 @@ class ObjDetect : public jevois::StdModule
 		//! Constructor
 		ObjDetect(std::string const & instance) : jevois::StdModule(instance), itsScoresStr(" ") {
 
-			std::string const wpath = absolutePath("tiny-dnn/CIFAR/weights.tnn");
+			const std::string wpath = "/jevois/modules/Bilal/ObjDetect/tiny-dnn/weights.tnn";
+
 
 			using conv    = tiny_dnn::convolutional_layer;
 			using pool    = tiny_dnn::max_pooling_layer;
@@ -90,7 +91,10 @@ class ObjDetect : public jevois::StdModule
 
 			try
 			{
-				nn.load(wpath, tiny_dnn::content_type::weights, tiny_dnn::file_format::binary);
+				//nn.load(wpath, tiny_dnn::content_type::weights, tiny_dnn::file_format::binary);
+				// load nets
+				std::ifstream ifs(wpath.c_str());
+				ifs >> nn;
 				LINFO("Loaded pre-trained weights from " << wpath);
 			}
 			catch (...)
@@ -105,8 +109,6 @@ class ObjDetect : public jevois::StdModule
 		//! Processing function
 		virtual void process(jevois::InputFrame && inframe, jevois::OutputFrame && outframe) override
 		{
-			//Preprocessing, TODO: Refactor
-			// Load from file, if available, otherwise give warning.
 
 			//TODO: Hardcoded should read the batches.meta.txt file.
 			const std::array<const std::string, 10> names = {
