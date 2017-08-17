@@ -214,9 +214,9 @@ class ObjDetect : public jevois::StdModule
 		}
 
 	protected:
-		jevois::RawImage itsBanner;
 		std::string itsScoresStr;
 };
 
 // Allow the module to be loaded as a shared object (.so) file:
 JEVOIS_REGISTER_MODULE(ObjDetect);
+
