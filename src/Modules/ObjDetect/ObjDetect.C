@@ -33,8 +33,11 @@
 #define CNN_USE_TBB
 #undef CNN_USE_DOUBLE
 
+#define DNN_USE_IMAGE_API 1
+
 // All defines used by tiny-dnn, double check in the end
 #include <fstream>
+#include <iostream>
 
 #include <tiny-dnn/tiny_dnn/tiny_dnn.h>
 #include <tiny-dnn/tiny_dnn/nodes.h>
@@ -42,13 +45,18 @@
 #include <tiny-dnn/tiny_dnn/util/aligned_allocator.h> // for aligned_allocator
 #include <tiny-dnn/tiny_dnn/util/util.h> // for index3d
 #include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp> // used for debugging only, see imshow below
+
+//Defines for the input resolution
+#define RESOLUTION_WIDTH 640
+#define RESOLUTION_HEIGHT 480
 
 /*! This module detects object usign the cifar10 trained network
 
 @author Bilal Parvez
 
 TODO: Decide upon a video mapping
-@videomapping YUYV 640 480 28.5 YUYV 640 480 28.5 Bilal ObjDetect
+@videomapping1 YUYV 640 480 7.5 YUYV 640 480 7.5 Bilal ObjDetect
 @email bilalp@kth.se
 @address Landsberger Str. 425 , 81241 München
 @copyright Copyright (C) 2017 by Bilal Parvez
@@ -61,11 +69,48 @@ class ObjDetect : public jevois::StdModule
 	public:
 		tiny_dnn::network<tiny_dnn::sequential> nn;
 
+		/*
+		 * @brief rescale output to 0-100
+		 *
+		 * @note TODO: Look into what this does, and why it does it
+		 */
+		template <typename Activation> double rescale(double x) {
+			Activation a(1);
+			return 100.0 * (x - a.scale().first) / (a.scale().second - a.scale().first);
+		}
+
+		/*
+		 * @brief Convert the input image resolution
+		 *
+		 * @note Convert the resolution to the resolution supported by the network.
+		 * @note TODO: See what resolution I can get away with, change it so that the
+		 * camera provides the most optimal resolution making this function obselete
+		 */
+		void convert_image(const std::string &imagefilename,
+				double minv, double maxv, int w, int h, tiny_dnn::vec_t &data) {
+			tiny_dnn::image<> img(imagefilename, tiny_dnn::image_type::rgb);
+			tiny_dnn::image<> resized = resize_image(img, w, h);
+			data.resize(resized.width() * resized.height() * resized.depth());
+			for (size_t c = 0; c < resized.depth(); ++c) {
+				for (size_t y = 0; y < resized.height(); ++y) {
+					for (size_t x = 0; x < resized.width(); ++x) {
+						data[c * resized.width() * resized.height() + y * resized.width() + x] =
+							(maxv - minv) * (resized[y * resized.width() + x + c]) / 255.0 + minv;
+					}
+				}
+			}
+		}
+
 		//! Constructor
 		ObjDetect(std::string const & instance) : jevois::StdModule(instance), itsScoresStr(" ") {
 
-			const std::string wpath = "/jevois/modules/Bilal/ObjDetect/tiny-dnn/weights.tnn";
+		}
 
+		//! Post Initialization loading of weights
+		virtual void postInit() override
+		{
+			// My self trained weights
+			const std::string wpath = absolutePath("tiny-dnn/CIFAR/cifar-weights");
 
 			using conv    = tiny_dnn::convolutional_layer;
 			using pool    = tiny_dnn::max_pooling_layer;
@@ -91,15 +136,13 @@ class ObjDetect : public jevois::StdModule
 
 			try
 			{
-				//nn.load(wpath, tiny_dnn::content_type::weights, tiny_dnn::file_format::binary);
-				// load nets
-				std::ifstream ifs(wpath.c_str());
+				std::ifstream ifs(wpath);
 				ifs >> nn;
 				LINFO("Loaded pre-trained weights from " << wpath);
 			}
 			catch (...)
 			{
-				LINFO("Could not load pre-trained weights from " << wpath);
+				LFATAL("Could not load pre-trained weights from " << wpath);
 			}
 		}
 
@@ -117,9 +160,6 @@ class ObjDetect : public jevois::StdModule
 			};
 
 			static jevois::Timer itsProcessingTimer("Processing");
-			// This is when we have the position of the object, showing blank for
-			// now, also the pixel size and the location need to be adjusted.
-			static cv::Mat itsLastObject(60, 60, CV_8UC2, 0x80aa) ; // Note that this one will contain raw YUV pixels
 			static std::string itsLastObjectCateg;
 
 			// Wait for next available camera image:
@@ -139,53 +179,68 @@ class ObjDetect : public jevois::StdModule
 				default: LFATAL("Incorrent output height should be 480");
 			}
 
-			// Extract a raw YUYV ROI around attended point:
-			cv::Mat rawimgcv = jevois::rawimage::cvImage(inimg);
-			cv::Mat rawroi = jevois::rawimage::cvImage(inimg);
+			// Paste the original image to the top-left corner of the display:
+			jevois::rawimage::paste(inimg, outimg, 0, 0);
 
-			cv::Mat objroi;
+			// Get the input size and shape of the network
+			auto inshape = nn[0]->in_shape()[0];
+			auto sz = inshape.size();
 
-			cv::cvtColor(rawroi, objroi, CV_YUV2RGB_YUYV);
-			cv::resize(objroi, objroi, cv::Size(32, 32), 0, 0, cv::INTER_AREA);
+			// Converting the raw image to opencv mat format
+			cv::Mat rawcvimage = jevois::rawimage::cvImage(inimg);
+
+			// In imshow is the conversion wrong , or does imshow
+			// show the default conversion of opencv what is bgr.
+			// TODO: Find out the correct resolution
+			cv::cvtColor(rawcvimage, rawcvimage, CV_YUV2BGR_YUYV);
+
+			// Resize according to the input sizes of the first layer of the ML network
+			cv::resize(rawcvimage, rawcvimage, cv::Size(inshape.width_, inshape.height_), 0, 0, cv::INTER_AREA);
+
+			//Add debug image print
+			//cv::imshow("Input image to network", rawcvimage);cv::waitKey(1);
 
 			// Convert input image to vec_t with values in [-1..1]:
-			auto inshape = nn[0]->in_shape()[0];
-			size_t const sz = inshape.size();
-
 			tiny_dnn::vec_t data(sz);
-			unsigned char const * in = objroi.data; tiny_dnn::float_t * out = &data[0];
+			unsigned char const * in = rawcvimage.data; tiny_dnn::float_t * out = &data[0];
 			for (size_t i = 0; i < sz; ++i) *out++ = (*in++) * (2.0F / 255.0F) - 1.0F;
 
-			// Launch object recognition on the ROI and get the recognition scores
-			// , see what to call predict on
-			auto scores = nn.predict(data);
+			/* Commenting out for now TODO: Figure out how to use
+			// Testing if this converstion somehow works better
+			// convert imagefile to vec_t
+			tiny_dnn::vec_t data;
+			convert_image(inimg, -1.0, 1.0, 32, 32, data);
+			*/
+
+			// Launch object recognition.
+			auto res = nn.predict(data);
+			std::vector<std::pair<double, int>> scores;
+
+			// sort & print top-3
+			for (int i = 0; i < 10; i++)
+				scores.emplace_back(rescale<tiny_dnn::tanh_layer>(res[i]), i);
+
+			sort(scores.begin(), scores.end(), std::greater<std::pair<double, int>>());
 
 			// Create a string to show all scores:
 			std::ostringstream oss;
-			for (size_t i = 0; i < scores.size(); ++i)
-				oss << names[i] << ':' << std::fixed << std::setprecision(2) << scores[i] << ' ';
+			for (int i = 0; i < 3; i++)
+				oss << names[scores[i].second] << "," << scores[i].first << std::endl;
 			itsScoresStr = oss.str();
 
-
 			// Check whether the highest score is very high and significantly higher than the second best:
-			float best1 = scores[0], best2 = scores[0]; size_t idx1 = 0, idx2 = 0;
-			for (size_t i = 1; i < scores.size(); ++i)
-			{
-				if (scores[i] > best1) { best2 = best1; idx2 = idx1; best1 = scores[i]; idx1 = i; }
-				else if (scores[i] > best2) { best2 = scores[i]; idx2 = i; }
-			}
+			float best1 = scores[0].first, best2 = scores[1].first;
 
 			// Update our display upon each "clean" recognition:
-			if (best1 > 90.0F && best2 < 20.0F)
+			if (best1 > 90.0F && best2 < 60.0F)
 			{
-				// Remember this recognized object for future displays:
-				itsLastObjectCateg = names[idx1];
-				itsLastObject = rawimgcv(cv::Rect(30, 30, 60, 60)).clone(); // make a deep copy
-
+				itsLastObjectCateg = names[scores[0].second];
 				LINFO("Object recognition: best: " << itsLastObjectCateg <<" (" << best1 <<
-						"), second best: " << names[idx2] << " (" << best2 << ')');
+						"), second best: " << names[scores[1].second] << " (" << best2 << ")");
 			}
 
+			// Handle the bottom of the banner for better readibility
+			jevois::rawimage::drawFilledRect(outimg, 0, 410, outimg.width, outimg.height - 250, 0x8000);
 
 			//One time define for the text color
 			unsigned short const txtcol = jevois::yuyv::White;
@@ -193,17 +248,11 @@ class ObjDetect : public jevois::StdModule
 			// Let camera know we are done processing the input image:
 			inframe.done(); // NOTE: optional here, inframe destructor would call it anyway
 
-			cv::Mat outimgcv(outimg.height, outimg.width, CV_8UC2, outimg.buf->data());
-			itsLastObject.copyTo(outimgcv(cv::Rect(520, 240, 60, 60)));
-
-			// Print a text message, only for debugging , remove afterwards
-			jevois::rawimage::writeText(outimg, "Hello MOFO!", 100, 230, txtcol, jevois::rawimage::Font20x38);
-
 			// Print all object scores:
-			jevois::rawimage::writeText(outimg, itsScoresStr, 2, 301, txtcol);
+			jevois::rawimage::writeText(outimg, itsScoresStr, 3, 480 - 40, txtcol);
 
 			// Write any positively recognized object category:
-			jevois::rawimage::writeText(outimg, itsLastObjectCateg.c_str(), 517-6*itsLastObjectCateg.length(), 263, txtcol);
+			jevois::rawimage::writeText(outimg, itsLastObjectCateg.c_str(), 350, 480 - 40, txtcol);
 
 			// Show processing fps:
 			std::string const & fpscpu = itsProcessingTimer.stop();

@@ -2,8 +2,9 @@ general:
   displayname: Obj Detect 
   synopsis: This author is too lazy to write a synopsis! 
   description: > 
-    This module detects object usign the cifar10 trained network<p>TODO: Decide
-      upon a video mapping 
+    <p>This module detects object usign the cifar10 trained network<p>TODO:
+      Decide upon a video mapping  YUYV 640 480 7.5 YUYV 640 480 7.5 Bilal
+      ObjDetect 
 
   parameters: 
 
