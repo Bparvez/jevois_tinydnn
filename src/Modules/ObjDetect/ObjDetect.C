@@ -46,6 +46,7 @@
 #include <tiny-dnn/tiny_dnn/util/util.h> // for index3d
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp> // used for debugging only, see imshow below
+#include <jevoisbase/Components/Saliency/Saliency.H>
 
 //Defines for the input resolution
 #define RESOLUTION_WIDTH 640
@@ -82,6 +83,7 @@ class ObjDetect : public jevois::StdModule
 
 		//! Constructor
 		ObjDetect(std::string const & instance) : jevois::StdModule(instance), itsScoresStr(" ") {
+			itsSaliency = addSubComponent<Saliency>("saliency");
 
 		}
 
@@ -138,6 +140,7 @@ class ObjDetect : public jevois::StdModule
 				"ship", "truck",
 			};
 
+			static cv::Mat itsLastObject(60, 60, CV_8UC2, 0x80aa) ; // Note that this one will contain raw YUV pixels
 			static jevois::Timer itsProcessingTimer("Processing");
 			static std::string itsLastObjectCateg;
 
@@ -148,6 +151,10 @@ class ObjDetect : public jevois::StdModule
 			inimg.require("input", 640, 480, V4L2_PIX_FMT_YUYV);
 
 			itsProcessingTimer.start();
+			int const roihw = 32; // face & object roi half width and height
+
+			// Compute saliency, in a thread:
+			auto sal_fut = std::async(std::launch::async, [&](){ itsSaliency->process(inimg, true); });
 
 			// Wait for an image from our gadget driver into which we will put our results:
 			jevois::RawImage outimg = outframe.get();
@@ -157,16 +164,36 @@ class ObjDetect : public jevois::StdModule
 				case 360: //Something is wrong
 				default: LFATAL("Incorrent output height should be 480");
 			}
-
 			// Paste the original image to the top-left corner of the display:
 			jevois::rawimage::paste(inimg, outimg, 0, 0);
+
+			// Wait until saliency computation is complete:
+			sal_fut.get();
+
+			// find most salient point:
+			int mx, my; intg32 msal;
+			itsSaliency->getSaliencyMax(mx, my, msal);
+
+			// Scale back to original image coordinates:
+			int const smlev = itsSaliency->smscale::get();
+			int const smadj = smlev > 0 ? (1 << (smlev-1)) : 0; // half a saliency map pixel adjustment
+			int const dmx = (mx << smlev) + smadj;
+			int const dmy = (my << smlev) + smadj;
+
+			// Compute instantaneous attended ROI (note: coords must be even to avoid flipping U/V when we later paste):
+			int const rx = std::min(int(inimg.width) - roihw, std::max(roihw, dmx));
+			int const ry = std::min(int(inimg.height) - roihw, std::max(roihw, dmy));
+
+			// Extract a raw YUYV ROI around attended point:
+			cv::Mat rawimgcv = jevois::rawimage::cvImage(inimg);
+			cv::Mat rawcvimage = rawimgcv(cv::Rect(rx - roihw, ry - roihw, roihw * 2, roihw * 2));
 
 			// Get the input size and shape of the network
 			auto inshape = nn[0]->in_shape()[0];
 			auto sz = inshape.size();
 
 			// Converting the raw image to opencv mat format
-			cv::Mat rawcvimage = jevois::rawimage::cvImage(inimg);
+		//	cv::Mat rawcvimage = jevois::rawimage::cvImage(inimg);
 
 			// In imshow is the conversion wrong , or does imshow
 			// show the default conversion of opencv what is bgr.
