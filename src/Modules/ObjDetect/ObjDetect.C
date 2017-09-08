@@ -79,27 +79,6 @@ class ObjDetect : public jevois::StdModule
 			return 100.0 * (x - a.scale().first) / (a.scale().second - a.scale().first);
 		}
 
-		/*
-		 * @brief Convert the input image resolution
-		 *
-		 * @note Convert the resolution to the resolution supported by the network.
-		 * @note TODO: See what resolution I can get away with, change it so that the
-		 * camera provides the most optimal resolution making this function obselete
-		 */
-		void convert_image(const std::string &imagefilename,
-				double minv, double maxv, int w, int h, tiny_dnn::vec_t &data) {
-			tiny_dnn::image<> img(imagefilename, tiny_dnn::image_type::rgb);
-			tiny_dnn::image<> resized = resize_image(img, w, h);
-			data.resize(resized.width() * resized.height() * resized.depth());
-			for (size_t c = 0; c < resized.depth(); ++c) {
-				for (size_t y = 0; y < resized.height(); ++y) {
-					for (size_t x = 0; x < resized.width(); ++x) {
-						data[c * resized.width() * resized.height() + y * resized.width() + x] =
-							(maxv - minv) * (resized[y * resized.width() + x + c]) / 255.0 + minv;
-					}
-				}
-			}
-		}
 
 		//! Constructor
 		ObjDetect(std::string const & instance) : jevois::StdModule(instance), itsScoresStr(" ") {
@@ -192,27 +171,22 @@ class ObjDetect : public jevois::StdModule
 			// In imshow is the conversion wrong , or does imshow
 			// show the default conversion of opencv what is bgr.
 			// TODO: Find out the correct resolution
-			cv::cvtColor(rawcvimage, rawcvimage, CV_YUV2BGR_YUYV);
+			cv::cvtColor(rawcvimage, rawcvimage, CV_YUV2RGB_YUYV);
+
+			//Add debug image print
+			cv::imshow("Input image to network", rawcvimage);cv::waitKey(1);
 
 			// Resize according to the input sizes of the first layer of the ML network
 			cv::resize(rawcvimage, rawcvimage, cv::Size(inshape.width_, inshape.height_), 0, 0, cv::INTER_AREA);
 
-			//Add debug image print
-			//cv::imshow("Input image to network", rawcvimage);cv::waitKey(1);
 
 			// Convert input image to vec_t with values in [-1..1]:
+			// If does not work change back swap 2.0F and *in++
 			tiny_dnn::vec_t data(sz);
 			unsigned char const * in = rawcvimage.data; tiny_dnn::float_t * out = &data[0];
 			for (size_t i = 0; i < sz; ++i) *out++ = (*in++) * (2.0F / 255.0F) - 1.0F;
 
-			/* Commenting out for now TODO: Figure out how to use
-			// Testing if this converstion somehow works better
-			// convert imagefile to vec_t
-			tiny_dnn::vec_t data;
-			convert_image(inimg, -1.0, 1.0, 32, 32, data);
-			*/
-
-			// Launch object recognition.
+			// Launch Image classification
 			auto res = nn.predict(data);
 			std::vector<std::pair<double, int>> scores;
 
